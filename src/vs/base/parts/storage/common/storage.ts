@@ -3,11 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ThrottledDelayer } from 'vs/base/common/async';
-import { Event, PauseableEmitter } from 'vs/base/common/event';
-import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
-import { parse, stringify } from 'vs/base/common/marshalling';
-import { isObject, isUndefinedOrNull } from 'vs/base/common/types';
+import { ThrottledDelayer } from '../../../common/async.js';
+import { Event, PauseableEmitter } from '../../../common/event.js';
+import { Disposable, IDisposable } from '../../../common/lifecycle.js';
+import { parse, stringify } from '../../../common/marshalling.js';
+import { isObject, isUndefinedOrNull } from '../../../common/types.js';
 
 export enum StorageHint {
 
@@ -123,7 +123,7 @@ export class Storage extends Disposable implements IStorage {
 
 	private cache = new Map<string, string>();
 
-	private readonly flushDelayer = new ThrottledDelayer<void>(Storage.DEFAULT_FLUSH_DELAY);
+	private readonly flushDelayer = this._register(new ThrottledDelayer<void>(Storage.DEFAULT_FLUSH_DELAY));
 
 	private pendingDeletes = new Set<string>();
 	private pendingInserts = new Map<string, string>();
@@ -349,7 +349,7 @@ export class Storage extends Disposable implements IStorage {
 		// the DB is not healthy.
 		try {
 			await this.doFlush(0 /* as soon as possible */);
-		} catch (error) {
+		} catch {
 			// Ignore
 		}
 
@@ -384,14 +384,21 @@ export class Storage extends Disposable implements IStorage {
 	}
 
 	async flush(delay?: number): Promise<void> {
-		if (!this.hasPending) {
-			return; // return early if nothing to do
+		if (
+			this.state === StorageState.Closed || 	// Return early if we are already closed
+			this.pendingClose 						// return early if nothing to do
+		) {
+			return;
 		}
 
 		return this.doFlush(delay);
 	}
 
 	private async doFlush(delay?: number): Promise<void> {
+		if (this.options.hint === StorageHint.STORAGE_IN_MEMORY) {
+			return this.flushPending(); // return early if in-memory
+		}
+
 		return this.flushDelayer.trigger(() => this.flushPending(), delay);
 	}
 
@@ -405,12 +412,6 @@ export class Storage extends Disposable implements IStorage {
 
 	isInMemory(): boolean {
 		return this.options.hint === StorageHint.STORAGE_IN_MEMORY;
-	}
-
-	override dispose(): void {
-		this.flushDelayer.dispose();
-
-		super.dispose();
 	}
 }
 

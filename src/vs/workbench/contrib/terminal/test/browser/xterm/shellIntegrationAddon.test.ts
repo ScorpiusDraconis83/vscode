@@ -3,14 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { Terminal } from 'xterm';
-import { strictEqual, deepStrictEqual, deepEqual } from 'assert';
+import type { Terminal } from '@xterm/xterm';
+import { deepEqual, deepStrictEqual, strictEqual } from 'assert';
 import * as sinon from 'sinon';
-import { parseKeyValueAssignment, parseMarkSequence, deserializeMessage, ShellIntegrationAddon } from 'vs/platform/terminal/common/xterm/shellIntegrationAddon';
-import { ITerminalCapabilityStore, TerminalCapability } from 'vs/platform/terminal/common/capabilities/capabilities';
-import { NullLogService } from 'vs/platform/log/common/log';
-import { importAMDNodeModule } from 'vs/amdX';
-import { writeP } from 'vs/workbench/contrib/terminal/browser/terminalTestHelpers';
+import { importAMDNodeModule } from '../../../../../../amdX.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
+import { NullLogService } from '../../../../../../platform/log/common/log.js';
+import { ITerminalCapabilityStore, TerminalCapability } from '../../../../../../platform/terminal/common/capabilities/capabilities.js';
+import { deserializeVSCodeOscMessage, serializeVSCodeOscMessage, parseKeyValueAssignment, parseMarkSequence, ShellIntegrationAddon } from '../../../../../../platform/terminal/common/xterm/shellIntegrationAddon.js';
+import { writeP } from '../../../browser/terminalTestHelpers.js';
 
 class TestShellIntegrationAddon extends ShellIntegrationAddon {
 	getCommandDetectionMock(terminal: Terminal): sinon.SinonMock {
@@ -26,15 +27,16 @@ class TestShellIntegrationAddon extends ShellIntegrationAddon {
 }
 
 suite('ShellIntegrationAddon', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
 	let xterm: Terminal;
 	let shellIntegrationAddon: TestShellIntegrationAddon;
 	let capabilities: ITerminalCapabilityStore;
 
 	setup(async () => {
-
-		const TerminalCtor = (await importAMDNodeModule<typeof import('xterm')>('xterm', 'lib/xterm.js')).Terminal;
-		xterm = new TerminalCtor({ allowProposedApi: true, cols: 80, rows: 30 });
-		shellIntegrationAddon = new TestShellIntegrationAddon('', true, undefined, new NullLogService());
+		const TerminalCtor = (await importAMDNodeModule<typeof import('@xterm/xterm')>('@xterm/xterm', 'lib/xterm.js')).Terminal;
+		xterm = store.add(new TerminalCtor({ allowProposedApi: true, cols: 80, rows: 30 }));
+		shellIntegrationAddon = store.add(new TestShellIntegrationAddon('', true, undefined, undefined, new NullLogService()));
 		xterm.loadAddon(shellIntegrationAddon);
 		capabilities = shellIntegrationAddon.capabilities;
 	});
@@ -246,69 +248,106 @@ suite('ShellIntegrationAddon', () => {
 				deepEqual(parseMarkSequence(['', '']), { id: undefined, hidden: false });
 			});
 			test('ID', async () => {
-				deepEqual(parseMarkSequence(['Id=3', '']), { id: "3", hidden: false });
+				deepEqual(parseMarkSequence(['Id=3', '']), { id: '3', hidden: false });
 			});
 			test('hidden', async () => {
 				deepEqual(parseMarkSequence(['', 'Hidden']), { id: undefined, hidden: true });
 			});
 			test('ID + hidden', async () => {
-				deepEqual(parseMarkSequence(['Id=4555', 'Hidden']), { id: "4555", hidden: true });
+				deepEqual(parseMarkSequence(['Id=4555', 'Hidden']), { id: '4555', hidden: true });
 			});
 		});
 	});
-});
 
-suite('deserializeMessage', () => {
-	// A single literal backslash, in order to avoid confusion about whether we are escaping test data or testing escapes.
-	const Backslash = '\\' as const;
-	const Newline = '\n' as const;
-	const Semicolon = ';' as const;
+	suite('deserializeMessage', () => {
+		// A single literal backslash, in order to avoid confusion about whether we are escaping test data or testing escapes.
+		const Backslash = '\\' as const;
+		const Newline = '\n' as const;
+		const Semicolon = ';' as const;
 
-	type TestCase = [title: string, input: string, expected: string];
-	const cases: TestCase[] = [
-		['empty', '', ''],
-		['basic', 'value', 'value'],
-		['space', 'some thing', 'some thing'],
-		['escaped backslash', `${Backslash}${Backslash}`, Backslash],
-		['non-initial escaped backslash', `foo${Backslash}${Backslash}`, `foo${Backslash}`],
-		['two escaped backslashes', `${Backslash}${Backslash}${Backslash}${Backslash}`, `${Backslash}${Backslash}`],
-		['escaped backslash amidst text', `Hello${Backslash}${Backslash}there`, `Hello${Backslash}there`],
-		['backslash escaped literally and as hex', `${Backslash}${Backslash} is same as ${Backslash}x5c`, `${Backslash} is same as ${Backslash}`],
-		['escaped semicolon', `${Backslash}x3b`, Semicolon],
-		['non-initial escaped semicolon', `foo${Backslash}x3b`, `foo${Semicolon}`],
-		['escaped semicolon (upper hex)', `${Backslash}x3B`, Semicolon],
-		['escaped backslash followed by literal "x3b" is not a semicolon', `${Backslash}${Backslash}x3b`, `${Backslash}x3b`],
-		['non-initial escaped backslash followed by literal "x3b" is not a semicolon', `foo${Backslash}${Backslash}x3b`, `foo${Backslash}x3b`],
-		['escaped backslash followed by escaped semicolon', `${Backslash}${Backslash}${Backslash}x3b`, `${Backslash}${Semicolon}`],
-		['escaped semicolon amidst text', `some${Backslash}x3bthing`, `some${Semicolon}thing`],
-		['escaped newline', `${Backslash}x0a`, Newline],
-		['non-initial escaped newline', `foo${Backslash}x0a`, `foo${Newline}`],
-		['escaped newline (upper hex)', `${Backslash}x0A`, Newline],
-		['escaped backslash followed by literal "x0a" is not a newline', `${Backslash}${Backslash}x0a`, `${Backslash}x0a`],
-		['non-initial escaped backslash followed by literal "x0a" is not a newline', `foo${Backslash}${Backslash}x0a`, `foo${Backslash}x0a`],
-	];
+		type TestCase = [title: string, input: string, expected: string];
+		const cases: TestCase[] = [
+			['empty', '', ''],
+			['basic', 'value', 'value'],
+			['space', 'some thing', 'some thing'],
+			['escaped backslash', `${Backslash}${Backslash}`, Backslash],
+			['non-initial escaped backslash', `foo${Backslash}${Backslash}`, `foo${Backslash}`],
+			['two escaped backslashes', `${Backslash}${Backslash}${Backslash}${Backslash}`, `${Backslash}${Backslash}`],
+			['escaped backslash amidst text', `Hello${Backslash}${Backslash}there`, `Hello${Backslash}there`],
+			['backslash escaped literally and as hex', `${Backslash}${Backslash} is same as ${Backslash}x5c`, `${Backslash} is same as ${Backslash}`],
+			['escaped semicolon', `${Backslash}x3b`, Semicolon],
+			['non-initial escaped semicolon', `foo${Backslash}x3b`, `foo${Semicolon}`],
+			['escaped semicolon (upper hex)', `${Backslash}x3B`, Semicolon],
+			['escaped backslash followed by literal "x3b" is not a semicolon', `${Backslash}${Backslash}x3b`, `${Backslash}x3b`],
+			['non-initial escaped backslash followed by literal "x3b" is not a semicolon', `foo${Backslash}${Backslash}x3b`, `foo${Backslash}x3b`],
+			['escaped backslash followed by escaped semicolon', `${Backslash}${Backslash}${Backslash}x3b`, `${Backslash}${Semicolon}`],
+			['escaped semicolon amidst text', `some${Backslash}x3bthing`, `some${Semicolon}thing`],
+			['escaped newline', `${Backslash}x0a`, Newline],
+			['non-initial escaped newline', `foo${Backslash}x0a`, `foo${Newline}`],
+			['escaped newline (upper hex)', `${Backslash}x0A`, Newline],
+			['escaped backslash followed by literal "x0a" is not a newline', `${Backslash}${Backslash}x0a`, `${Backslash}x0a`],
+			['non-initial escaped backslash followed by literal "x0a" is not a newline', `foo${Backslash}${Backslash}x0a`, `foo${Backslash}x0a`],
+			['PS1 simple', '[\\u@\\h \\W]\\$', '[\\u@\\h \\W]\\$'],
+			['PS1 VSC SI', `${Backslash}x1b]633;A${Backslash}x07\\[${Backslash}x1b]0;\\u@\\h:\\w\\a\\]${Backslash}x1b]633;B${Backslash}x07`, '\x1b]633;A\x07\\[\x1b]0;\\u@\\h:\\w\\a\\]\x1b]633;B\x07']
+		];
 
-	cases.forEach(([title, input, expected]) => {
-		test(title, () => strictEqual(deserializeMessage(input), expected));
+		cases.forEach(([title, input, expected]) => {
+			test(title, () => strictEqual(deserializeVSCodeOscMessage(input), expected));
+		});
 	});
-});
 
-test('parseKeyValueAssignment', () => {
-	type TestCase = [title: string, input: string, expected: [key: string, value: string | undefined]];
-	const cases: TestCase[] = [
-		['empty', '', ['', undefined]],
-		['no "=" sign', 'some-text', ['some-text', undefined]],
-		['empty value', 'key=', ['key', '']],
-		['empty key', '=value', ['', 'value']],
-		['normal', 'key=value', ['key', 'value']],
-		['multiple "=" signs (1)', 'key==value', ['key', '=value']],
-		['multiple "=" signs (2)', 'key=value===true', ['key', 'value===true']],
-		['just a "="', '=', ['', '']],
-		['just a "=="', '==', ['', '=']],
-	];
+	suite('serializeVSCodeOscMessage', () => {
+		// A single literal backslash, in order to avoid confusion about whether we are escaping test data or testing escapes.
+		const Backslash = '\\' as const;
+		const Newline = '\n' as const;
+		const Semicolon = ';' as const;
 
-	cases.forEach(x => {
-		const [title, input, [key, value]] = x;
-		deepStrictEqual(parseKeyValueAssignment(input), { key, value }, title);
+		type TestCase = [title: string, input: string, expected: string];
+		const cases: TestCase[] = [
+			['empty', '', ''],
+			['basic', 'value', 'value'],
+			['space', 'some thing', `some${Backslash}x20thing`],
+			['backslash', Backslash, `${Backslash}${Backslash}`],
+			['non-initial backslash', `foo${Backslash}`, `foo${Backslash}${Backslash}`],
+			['two backslashes', `${Backslash}${Backslash}`, `${Backslash}${Backslash}${Backslash}${Backslash}`],
+			['backslash amidst text', `Hello${Backslash}there`, `Hello${Backslash}${Backslash}there`],
+			['semicolon', Semicolon, `${Backslash}x3b`],
+			['non-initial semicolon', `foo${Semicolon}`, `foo${Backslash}x3b`],
+			['semicolon amidst text', `some${Semicolon}thing`, `some${Backslash}x3bthing`],
+			['newline', Newline, `${Backslash}x0a`],
+			['non-initial newline', `foo${Newline}`, `foo${Backslash}x0a`],
+			['newline amidst text', `some${Newline}thing`, `some${Backslash}x0athing`],
+			['tab character', '\t', `${Backslash}x09`],
+			['carriage return', '\r', `${Backslash}x0d`],
+			['null character', '\x00', `${Backslash}x00`],
+			['space character (0x20)', ' ', `${Backslash}x20`],
+			['character above 0x20', '!', '!'],
+			['multiple special chars', `hello${Newline}world${Semicolon}test${Backslash}end`, `hello${Backslash}x0aworld${Backslash}x3btest${Backslash}${Backslash}end`],
+			['PS1 with escape sequences', `\x1b]633;A\x07\\[\x1b]0;\\u@\\h:\\w\\a\\]\x1b]633;B\x07`, `${Backslash}x1b]633${Backslash}x3bA${Backslash}x07${Backslash}${Backslash}[${Backslash}x1b]0${Backslash}x3b${Backslash}${Backslash}u@${Backslash}${Backslash}h:${Backslash}${Backslash}w${Backslash}${Backslash}a${Backslash}${Backslash}]${Backslash}x1b]633${Backslash}x3bB${Backslash}x07`]
+		];
+
+		cases.forEach(([title, input, expected]) => {
+			test(title, () => strictEqual(serializeVSCodeOscMessage(input), expected));
+		});
+	});
+
+	test('parseKeyValueAssignment', () => {
+		type TestCase = [title: string, input: string, expected: [key: string, value: string | undefined]];
+		const cases: TestCase[] = [
+			['empty', '', ['', undefined]],
+			['no "=" sign', 'some-text', ['some-text', undefined]],
+			['empty value', 'key=', ['key', '']],
+			['empty key', '=value', ['', 'value']],
+			['normal', 'key=value', ['key', 'value']],
+			['multiple "=" signs (1)', 'key==value', ['key', '=value']],
+			['multiple "=" signs (2)', 'key=value===true', ['key', 'value===true']],
+			['just a "="', '=', ['', '']],
+			['just a "=="', '==', ['', '=']],
+		];
+
+		cases.forEach(x => {
+			const [title, input, [key, value]] = x;
+			deepStrictEqual(parseKeyValueAssignment(input), { key, value }, title);
+		});
 	});
 });

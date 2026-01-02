@@ -2,14 +2,14 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import * as nls from 'vs/nls';
+import * as nls from '../../../../nls.js';
 
-import { Registry } from 'vs/platform/registry/common/platform';
-import { Extensions as JSONExtensions, IJSONContributionRegistry } from 'vs/platform/jsonschemas/common/jsonContributionRegistry';
-import { IJSONSchema } from 'vs/base/common/jsonSchema';
+import { Registry } from '../../../../platform/registry/common/platform.js';
+import { Extensions as JSONExtensions, IJSONContributionRegistry } from '../../../../platform/jsonschemas/common/jsonContributionRegistry.js';
+import { IJSONSchema } from '../../../../base/common/jsonSchema.js';
 
-import { workbenchColorsSchemaId } from 'vs/platform/theme/common/colorRegistry';
-import { tokenStylingSchemaId } from 'vs/platform/theme/common/tokenClassificationRegistry';
+import { workbenchColorsSchemaId } from '../../../../platform/theme/common/colorRegistry.js';
+import { tokenStylingSchemaId } from '../../../../platform/theme/common/tokenClassificationRegistry.js';
 
 const textMateScopes = [
 	'comment',
@@ -169,6 +169,18 @@ const textmateColorSchema: IJSONSchema = {
 						{ body: 'bold underline strikethrough' },
 						{ body: 'italic bold underline strikethrough' }
 					]
+				},
+				fontFamily: {
+					type: 'string',
+					description: nls.localize('schema.token.fontFamily', 'Font family for the token (e.g., "Fira Code", "JetBrains Mono").')
+				},
+				fontSize: {
+					type: 'string',
+					description: nls.localize('schema.token.fontSize', 'Font size string for the token (e.g., "14px", "1.2em").')
+				},
+				lineHeight: {
+					type: 'number',
+					description: nls.localize('schema.token.lineHeight', 'Line height number for the token (e.g., "20").')
 				}
 			},
 			additionalProperties: false,
